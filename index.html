@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SignalWire v4 supplied-audio repro</title>
+    <link rel="stylesheet" href="style.css" />
+    <!-- Loaded first, so every RTCPeerConnection, getUserMedia call and
+         track.stop() the SDK makes is recorded. See instrument.js. -->
+    <script src="instrument.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>SignalWire v4 supplied-audio repro</h1>
+      <p class="sdk">SDK <span id="sdk-version">loading...</span></p>
+    </header>
+
+    <section class="panel">
+      <label for="token">Token (v4 SAT)</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="eyJ..." />
+
+      <label for="destination">Room / destination</label>
+      <input id="destination" type="text" autocomplete="off" spellcheck="false" placeholder="/public/my-room" />
+
+      <div class="row">
+        <button id="join" class="primary">Join</button>
+        <button id="leave" disabled>Leave</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="row">
+        <button id="mic" disabled>Mic: on</button>
+        <button id="video" disabled>Video: on</button>
+        <button id="screen" disabled>Share screen</button>
+      </div>
+      <div class="row">
+        <button id="extra-audio" class="secondary" disabled>Add extra audio track (440 Hz tone)</button>
+        <button id="remove-extra" class="secondary" disabled>Remove extra leg</button>
+      </div>
+      <p class="hint">
+        The tone is handed to the SDK as <code>inputAudioStream</code> on a new leg. Nothing else on the page
+        touches it after that, so anything that happens to it is the SDK's doing. <b>Remove extra leg</b> closes
+        the most recent one through <code>removeAdditionalDevice()</code>.
+      </p>
+      <div class="row">
+        <button id="drop-socket" class="secondary" disabled>Drop socket (force a reconnect)</button>
+      </div>
+      <p class="hint">
+        Closes the SDK's WebSocket from the client side so it reconnects while the call keeps running. Wait for
+        <code>signal-only reconnect</code> in the log, then share the screen.
+      </p>
+      <div class="row between">
+        <h2>verto.ping</h2>
+        <p id="ping-due" class="readout">no verto.ping yet</p>
+      </div>
+      <div class="row">
+        <button id="drop-on-ping" class="secondary" disabled>Drop socket as next ping lands</button>
+        <button id="drop-before-ping" class="secondary" disabled>Drop socket just before next ping</button>
+        <button id="swallow-pong" class="secondary" disabled>Swallow next pong</button>
+      </div>
+      <p class="hint">
+        Reproduction 8. The first closes the socket as the next <code>verto.ping</code> arrives, so the SDK answers
+        into a closing socket. The second closes it 300ms before the ping is due, so the server sends it into the
+        gap. The third discards the SDK's <code>verto.pong</code> and leaves the socket alone. For the control, press
+        <b>Drop socket</b> midway between pings. Then wait one interval: a hang-up shows as <code>verto.bye</code>.
+      </p>
+    </section>
+
+    <section class="videos">
+      <figure>
+        <video id="local" autoplay playsinline muted></video>
+        <figcaption>local</figcaption>
+      </figure>
+      <figure>
+        <video id="remote" autoplay playsinline></video>
+        <figcaption>remote</figcaption>
+      </figure>
+    </section>
+
+    <section class="panel">
+      <div class="row between">
+        <h2>Received audio</h2>
+        <p id="tone-readout" class="readout"><span class="chip">not probing</span></p>
+      </div>
+      <p class="hint">
+        The mix the server sends back to this member, probed for the tones this page publishes. Its own leg's
+        660 Hz tone (<code>?maintone=1</code>) never arrives here, and its additional device's 440 Hz tone does:
+        that pair is reproduction 7.
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="row between">
+        <h2>Log</h2>
+        <div class="row">
+          <button id="copy-log" class="secondary">Copy</button>
+          <button id="clear-log" class="secondary">Clear</button>
+        </div>
+      </div>
+      <pre id="log"></pre>
+    </section>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
