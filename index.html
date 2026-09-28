@@ -59,11 +59,21 @@
         <button id="drop-before-ping" class="secondary" disabled>Drop socket just before next ping</button>
         <button id="swallow-pong" class="secondary" disabled>Swallow next pong</button>
       </div>
+      <div class="row">
+        <input id="resend-pong" type="checkbox" />
+        <label for="resend-pong">Resend the lost pong once recovered (run J)</label>
+      </div>
       <p class="hint">
         Reproduction 8. The first closes the socket as the next <code>verto.ping</code> arrives, so the SDK answers
         into a closing socket. The second closes it 300ms before the ping is due, so the server sends it into the
         gap. The third discards the SDK's <code>verto.pong</code> and leaves the socket alone. For the control, press
         <b>Drop socket</b> midway between pings. Then wait one interval: a hang-up shows as <code>verto.bye</code>.
+      </p>
+      <p class="hint">
+        Run J. With the box ticked, each of the three also replays a copy of the SDK's last <code>verto.pong</code>
+        (fresh ids): after a drop, as soon as the next socket authenticates; after a swallow, 6s later on the same
+        socket, once the SDK has given up on it. <code>SURVIVED</code> or <code>NOT RESCUED</code> in the log is the
+        answer: can a client resend keep the call alive until SignalWire fix the server?
       </p>
     </section>
 

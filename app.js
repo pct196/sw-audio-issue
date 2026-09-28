@@ -48,6 +48,7 @@ const ui = {
   dropOnPing: el('drop-on-ping'),
   dropBeforePing: el('drop-before-ping'),
   swallowPong: el('swallow-pong'),
+  resendPong: el('resend-pong'),
   local: el('local'),
   remote: el('remote')
 };
@@ -441,14 +442,15 @@ ui.dropSocket.addEventListener('click', () => {
 // Reproduction 8. The server pings every call on a fixed cadence and, it seems, hangs up a
 // call whose ping goes unanswered. Each button arms one way of losing a single answer; the
 // plain Drop socket above, pressed midway between pings, is the control.
+// Run J: the checkbox adds a resend of the lost pong to whichever variant is armed.
 ui.dropOnPing.addEventListener('click', () => {
-  if (call) dropSocketOnNextPing();
+  if (call) dropSocketOnNextPing({ resendPong: ui.resendPong.checked });
 });
 ui.dropBeforePing.addEventListener('click', () => {
-  if (call) dropSocketBeforeNextPing();
+  if (call) dropSocketBeforeNextPing({ resendPong: ui.resendPong.checked });
 });
 ui.swallowPong.addEventListener('click', () => {
-  if (call) swallowNextPong();
+  if (call) swallowNextPong({ resendPong: ui.resendPong.checked });
 });
 
 // ---- the extra audio track -------------------------------------------------

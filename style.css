@@ -80,6 +80,16 @@ input:focus {
   border-color: var(--accent);
 }
 
+input[type='checkbox'] {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.row label {
+  margin-bottom: 0;
+}
+
 .row {
   display: flex;
   gap: 8px;

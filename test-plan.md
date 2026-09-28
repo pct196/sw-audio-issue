@@ -28,6 +28,7 @@ runs exactly. Run I is on rc.3.
 | **H** | `/?maintone=1` | Join. **Add extra audio track**. Watch **Received audio** 30s. **Remove extra leg**, watch 10s. **Add extra audio track** again. Meanwhile read the second browser's readout | `run-H-own-additional-device-in-own-mix.log` plus `run-H-control-second-member.log` |
 | **F** | `/?supportedapi=1` | Join in two browsers. In one: **Share screen** and stop it (the control). **Drop socket**, wait for `signal-only reconnect`, toggle **Mic**, **Share screen**. While it waits, share from the other browser. After the 50s timeout toggle **Mic** again, then Leave | `run-F-signal-only-reconnect-invite-refused.log` |
 | **I** | `/` | Join in two browsers and wait for two `verto.ping`s, so the countdown shows. In one browser, once per reload: **Drop socket as next ping lands**, **Drop socket just before next ping**, **Swallow next pong**, and the control, **Drop socket** midway between pings. After each, wait at least two ping intervals and note whether a `verto.bye` arrives. Three times each | `run-I-drop-on-ping.log`, `run-I-drop-before-ping.log`, `run-I-swallow-pong.log`, `run-I-control-midway.log` |
+| **J** | `/` | Run I's three lost-pong variants again with **Resend the lost pong once recovered** ticked. Same procedure: two browsers, two pings first, one variant per reload, wait at least two ping intervals. Three times each. The log ends each run with `SURVIVED` (a later `verto.ping` arrived) or `NOT RESCUED` (`verto.bye` came anyway) | `run-J-drop-on-ping.log`, `run-J-drop-before-ping.log`, `run-J-swallow-pong.log` |
 
 Runs C and C2 take a while: an *answered* invite destroys the call (the fatal-classification
 defect), so rejoin before the next attempt. An unanswered one would sit for the SDK's 50s
@@ -179,6 +180,34 @@ Real network drops close with 1006, not 1000. If the client-side close behaves d
 repeat the first variant with a wifi toggle of about a second timed from the countdown, and
 if the log says `full reconnect` the peer connection dropped too and the attempt does not
 count.
+
+### Run J: can a resent `verto.pong` save the call?
+
+Run I showed one lost pong is fatal. Run J asks whether a client can work around that until
+the server is fixed, by sending the answer again once it can. The page copies the SDK's last
+real `verto.pong` frame and sends it with fresh request ids:
+
+- after **Drop as it lands** and **Drop just before**, the moment the next socket's
+  `signalwire.connect` is answered;
+- after **Swallow**, 6s later on the same socket, just after the SDK's pong RPC times out and
+  it raises `VertoPongError` (the moment a workaround would learn of the loss).
+
+The copy fits any ping on the call: a pong does not name the ping it answers, and its params
+are the call's `callID` and `dialogParams` only. So **Drop just before**, where the page never
+sees the ping, is the telling variant: it asks whether the server accepts an answer to a ping
+the client never received.
+
+```
+WebSocket #4 authenticated (signalwire.connect answered)
+RESENDING a verto.pong on WebSocket #4 (the connection is back after the drop), outer id=...
+verto.pong for no pending verto.ping acknowledged by the server in 450ms
+SURVIVED: a verto.ping arrived 45.1s after the resent verto.pong      <- workaround viable
+   or
+NOT RESCUED: verto.bye 40.2s after the resent verto.pong              <- only the server can fix it
+```
+
+An acknowledged resend that is still followed by a bye means the server accepts the frame but
+does not count it against the missed ping.
 
 ### Run E: the 6s call-create timeout contains `getUserMedia`
 

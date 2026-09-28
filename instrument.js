@@ -224,8 +224,20 @@
     overdueLogged: false,
     armedDropOnPing: false,
     armedSwallow: false,
-    dropTimer: null
+    dropTimer: null,
+    // Run J: replay the lost answer once the connection is back (see sendPongCopy()).
+    pongTemplate: null, // the last verto.pong frame the SDK sent, whole, to copy
+    resendOnAuth: false, // one-shot: resend on the next socket to authenticate
+    resendAfterSwallow: false, // one-shot: resend on the same socket after the SDK gives up
+    resentAt: 0 // when the replayed pong went out, until the call survives or ends
   };
+
+  // signalwire.connect request id -> socket number, so its reply marks that socket authenticated.
+  const connectRequests = new Map();
+
+  // The SDK's pong RPC times out after 5s and raises VertoPongError. The swallow variant
+  // resends just after that, which is when a client-side workaround would learn of the loss.
+  const RESEND_AFTER_SWALLOW_MS = 6000;
 
   function describeState(socket) {
     return ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][socket.readyState] ?? String(socket.readyState);
@@ -233,6 +245,13 @@
 
   function onPing(verto, socket, n) {
     const now = Date.now();
+    if (ping.resentAt) {
+      log(
+        `SURVIVED: a verto.ping arrived ${((now - ping.resentAt) / 1000).toFixed(1)}s after the resent verto.pong`,
+        'warn'
+      );
+      ping.resentAt = 0;
+    }
     const gap = ping.last ? now - ping.last : 0;
     if (ping.last) ping.interval = gap;
     ping.last = now;
@@ -270,6 +289,11 @@
     if (ping.armedSwallow) {
       ping.armedSwallow = false;
       log(`SWALLOWED the verto.pong for ${which}: never sent. The socket stays open`, 'warn');
+      if (ping.resendAfterSwallow) {
+        ping.resendAfterSwallow = false;
+        log(`  the pong will be resent in ${RESEND_AFTER_SWALLOW_MS / 1000}s, after the SDK gives up on it`, 'warn');
+        setTimeout(() => sendPongCopy(socket, n, 'the SDK gave up on the swallowed pong'), RESEND_AFTER_SWALLOW_MS);
+      }
       return false;
     }
     const state = describeState(socket);
@@ -309,6 +333,44 @@
     if (!frame.method) return `${'error' in frame ? 'ERROR' : 'RESULT'} for id=${frame.id}`;
     const inner = frame.params?.message?.method;
     return `request ${frame.method}${inner ? ` > ${inner}` : ''} id=${frame.id}`;
+  }
+
+  /**
+   * Run J: send a copy of the SDK's last verto.pong, with fresh request ids, on a socket
+   * that is authenticated. Tests whether a client-side workaround is possible: does the
+   * server accept a late pong, sent after the connection recovered, as the answer to a ping
+   * it thinks went unanswered? The pong does not name the ping it answers (its params are
+   * the call's callID and dialogParams only), so one copy fits any ping on this call,
+   * including a ping that never reached this page.
+   * @param {WebSocket} socket An OPEN, authenticated socket
+   * @param {number} n That socket's number
+   * @param {string} why What prompted the resend, for the log
+   */
+  function sendPongCopy(socket, n, why) {
+    if (!ping.pongTemplate) {
+      log('cannot resend a verto.pong: the SDK has not sent one yet to copy', 'bad');
+      return;
+    }
+    if (socket.readyState !== NativeWS.OPEN) {
+      log(`cannot resend the verto.pong: WebSocket #${n} is ${describeState(socket)}`, 'bad');
+      return;
+    }
+    const frame = structuredClone(ping.pongTemplate);
+    frame.id = crypto.randomUUID();
+    const inner = findMethod(frame, 'verto.pong');
+    inner.id = crypto.randomUUID();
+    log(`RESENDING a verto.pong on WebSocket #${n} (${why}), outer id=${frame.id}`, 'warn');
+    ping.resentAt = Date.now();
+    // Through the wrapped send, so onPong() logs it and the server's reply is matched.
+    socket.send(JSON.stringify(frame));
+  }
+
+  /** A socket's signalwire.connect was answered: it is authenticated. */
+  function onAuthenticated(socket, n) {
+    log(`WebSocket #${n} authenticated (signalwire.connect answered)`, 'dim');
+    if (!ping.resendOnAuth) return;
+    ping.resendOnAuth = false;
+    sendPongCopy(socket, n, 'the connection is back after the drop');
   }
 
   function onSocketClosed(n) {
@@ -375,7 +437,11 @@
             }
             const invite = findMethod(frame, 'verto.invite');
             if (invite) log(`verto.invite frame to WebSocket: ${JSON.stringify(redactSdp(invite))}`, 'warn');
-            if (findMethod(frame, 'verto.pong') && !onPong(frame, socket, n)) return undefined;
+            if (frame.method === 'signalwire.connect') connectRequests.set(frame.id, n);
+            if (findMethod(frame, 'verto.pong')) {
+              ping.pongTemplate = structuredClone(frame);
+              if (!onPong(frame, socket, n)) return undefined;
+            }
           }
         }
         return nativeSend(data);
@@ -396,10 +462,22 @@
         const vertoPing = findMethod(frame, 'verto.ping');
         if (vertoPing) onPing(vertoPing, socket, n);
         onPongReply(frame);
+        if (connectRequests.has(frame.id)) {
+          connectRequests.delete(frame.id);
+          if ('result' in frame) onAuthenticated(socket, n);
+          else log(`WebSocket #${n} signalwire.connect REJECTED: ${JSON.stringify(frame.error)}`, 'bad');
+        }
         // The hang-up, verbatim: a bye's cause and causeCode are on the wire even where the
         // SDK does not pass them on.
         const bye = findMethod(frame, 'verto.bye');
         if (bye) log(`verto.bye frame from WebSocket #${n}: ${JSON.stringify(bye)}`, 'bad');
+        if (bye && ping.resentAt) {
+          log(
+            `NOT RESCUED: verto.bye ${((Date.now() - ping.resentAt) / 1000).toFixed(1)}s after the resent verto.pong`,
+            'bad'
+          );
+          ping.resentAt = 0;
+        }
         const left = findCallLeft(frame);
         if (left) log(`call.left frame from WebSocket #${n}: ${JSON.stringify(left)}`, 'bad');
         // Once per member: the same child turns up again in every member.updated and in the
@@ -437,18 +515,29 @@
    * observe it, and only the buttons call them.
    */
 
-  /** Close the socket the moment the next verto.ping arrives, before the SDK can answer it. */
-  function dropSocketOnNextPing() {
+  /** Log and arm run J's resend for a reconnect variant. */
+  function armResendOnAuth(enabled) {
+    ping.resendOnAuth = enabled;
+    if (enabled) log('  and a verto.pong is resent once the next socket authenticates (run J)', 'warn');
+  }
+
+  /**
+   * Close the socket the moment the next verto.ping arrives, before the SDK can answer it.
+   * @param {{ resendPong?: boolean }} [options] Run J: resend a pong once reconnected
+   */
+  function dropSocketOnNextPing({ resendPong = false } = {}) {
     ping.armedDropOnPing = true;
     log('armed: the socket closes as the next verto.ping lands', 'warn');
+    armResendOnAuth(resendPong);
   }
 
   /**
    * Close the socket shortly before the next verto.ping is due, so the server sends it into
    * the gap. Closer to a real network blip than dropSocketOnNextPing().
-   * @param {number} leadMs How long before the predicted ping to close
+   * @param {{ leadMs?: number, resendPong?: boolean }} [options] How long before the predicted
+   *   ping to close; run J: resend a pong once reconnected
    */
-  function dropSocketBeforeNextPing(leadMs = 300) {
+  function dropSocketBeforeNextPing({ leadMs = 300, resendPong = false } = {}) {
     if (!ping.interval) {
       log('need two verto.pings first, to know when the next one is due', 'warn');
       return false;
@@ -459,6 +548,7 @@
     if (wait < 0) wait += ping.interval;
     const inS = (wait / 1000).toFixed(1);
     log(`armed: the socket closes in ${inS}s, ${leadMs}ms before the next verto.ping is due`, 'warn');
+    armResendOnAuth(resendPong);
     ping.dropTimer = setTimeout(() => {
       log(`closing ${leadMs}ms before the predicted verto.ping`, 'warn');
       dropSocket();
@@ -466,10 +556,15 @@
     return true;
   }
 
-  /** Discard the SDK's answer to the next verto.ping. No reconnect, the socket stays open. */
-  function swallowNextPong() {
+  /**
+   * Discard the SDK's answer to the next verto.ping. No reconnect, the socket stays open.
+   * @param {{ resendPong?: boolean }} [options] Run J: resend it after the SDK gives up on it
+   */
+  function swallowNextPong({ resendPong = false } = {}) {
     ping.armedSwallow = true;
+    ping.resendAfterSwallow = resendPong;
     log('armed: the answer to the next verto.ping is swallowed, the socket is left alone', 'warn');
+    if (resendPong) log(`  and resent ${RESEND_AFTER_SWALLOW_MS / 1000}s later on the same socket (run J)`, 'warn');
   }
 
   // ---- 5. probe what comes back --------------------------------------------
