@@ -297,7 +297,7 @@ provide a participant invite first", the operation failed 50 seconds later, and 
 | `app.js` | The whole application. Every SDK call it makes is a documented public one, except `vertoManager.addScreenMedia` where no public equivalent exists |
 | `instrument.js` | Observation, plus a few deliberate actions. Wraps `RTCPeerConnection`, `getUserMedia`, `getDisplayMedia`, `MediaStreamTrack.stop` and `WebSocket` to log what the SDK does: inbound `verto.mediaParams`, `verto.attach`, `verto.ping`, `verto.bye`, `call.left` and error frames, outbound `verto.invite` and `verto.pong`, the first few frames on each socket, and every open and close. It polls each peer connection's audio senders so a track swap is reported the moment it happens, probes the received stream for the tones the page publishes, and logs any member payload that names a parent. The functions that change things are called only by their buttons: `dropSocket()`, and for reproduction 8 `dropSocketOnNextPing()`, `dropSocketBeforeNextPing()` and `swallowNextPong()`, each of which can also resend the lost `verto.pong` |
 | `test-plan.md` | The exact steps for every captured run |
-| `test-plan.pdf` | `test-plan.md` as a printable PDF |
+| `test-plan-verto-ping.pdf` | One-page printable test plan for reproduction 8 (#16, #17) |
 | `style.css` | Styling |
 | `serve.mjs` | Dependency-free static HTTPS server |
 | `make-cert.sh` | Generates the self-signed certificate |
